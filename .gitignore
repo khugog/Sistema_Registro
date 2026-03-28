@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.env
+
+# CLAVES CRÍTICAS QUE NUNCA DEBEN COMPARTIRSE PÚBLICAMENTE:
+credenciales.json
+.secrets/
+
+# Streamlit
+.streamlit/
