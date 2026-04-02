@@ -6,6 +6,7 @@ import os
 import re
 from io import BytesIO
 import registro_asistentes
+import base64
 
 # Configuración de la página
 st.set_page_config(page_title="Consolidador de Colaboradores", page_icon="👥", layout="wide")

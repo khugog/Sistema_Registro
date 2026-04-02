@@ -3,6 +3,9 @@ import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import os
+import uuid
+import datetime
+import math
 
 # ==========================================
 # CONFIGURACIÓN BIGQUERY
@@ -11,6 +14,9 @@ PROJECT_ID = "sistema-consolidado-registro"
 DATASET_ID = "registros"
 TABLE_ID = "colaboradores"
 TABLE_FULL_NAME = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+TABLE_CAPACITACIONES = f"{PROJECT_ID}.{DATASET_ID}.datos_de_la_capacitacion"
+TABLE_CAPACITADORES = f"{PROJECT_ID}.{DATASET_ID}.datos_del_capacitador"
+TABLE_ASISTENTES = f"{PROJECT_ID}.{DATASET_ID}.lista_de_asistentes"
 
 # Ruta del archivo JSON
 CREDENTIALS_PATH = "credenciales.json"
@@ -34,6 +40,20 @@ def get_bq_client():
             return None
     else:
         return None
+
+def generar_siguiente_id(client):
+    try:
+        query = f"SELECT MAX(ID_Capacitacion) as max_id FROM `{TABLE_CAPACITACIONES}`"
+        df = client.query(query).to_dataframe()
+        if not df.empty and pd.notna(df.iloc[0]['max_id']):
+            max_id_str = str(df.iloc[0]['max_id']).strip()
+            if max_id_str.startswith('A') and max_id_str[1:].isdigit():
+                numero_actual = int(max_id_str[1:])
+                siguiente = numero_actual + 1
+                return f"A{siguiente:09d}"
+    except Exception:
+        pass
+    return "A000000001"
 
 def render_registro():
     if not os.path.exists(CREDENTIALS_PATH) and "gcp_service_account" not in st.secrets:
@@ -78,13 +98,12 @@ def render_registro():
             "DNI", "Código Ofisis", "Apellidos y Nombres", "Cargo", "Área", "Tienda", "Género", "Tipo de contrato", "Edad"
         ])
         # Agregar filas vacías de inicio
-        for i in range(5):
+        for i in range(900):
             st.session_state["df_asistentes"].loc[i] = ["", "", "", "", "", "", "", "", ""]
             
     # Mostrar el editor de datos interactivo
     df_asistentes_editado = st.data_editor(
         st.session_state["df_asistentes"],
-        num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         key="editor_asistentes" # Genera un widget state
@@ -183,12 +202,129 @@ def render_registro():
         
     st.write("")
     if st.button("Guardar Registro de Capacitación", type="primary"):
-        df_validos = df_asistentes_editado[df_asistentes_editado["DNI"].astype(str).str.strip() != ""]
-        if not df_validos.empty:
-            st.success(f"¡Se han registrado {len(df_validos)} asistentes correctamente!")
-            st.balloons()
-        else:
+        df_validos = df_asistentes_editado[df_asistentes_editado["DNI"].astype(str).str.strip() != ""].copy()
+        
+        # Validar si hay asistentes reales
+        if df_validos.empty:
             st.warning("No has ingresado ningún DNI válido.")
+        else:
+            with st.spinner("Guardando registro en la base de datos..."):
+                client = get_bq_client()
+                if not client:
+                    st.error("No se pudo conectar a la base de datos. Verifica tus credenciales.")
+                else:
+                    try:
+                        # 1. Generar ID Único autoincremental de la sesión
+                        id_sesion = generar_siguiente_id(client)
+                        
+                        # 2. Obtener los datos de los formularios
+                        cap_nombre = st.session_state.get("cap_nombre", "")
+                        cap_tienda = st.session_state.get("cap_tienda", "")
+                        cap_horas = st.session_state.get("cap_horas", 1.0)
+                        cap_fecha = str(st.session_state.get("cap_fecha", pd.Timestamp.today().date()))
+                        cap_modalidad = st.session_state.get("cap_modalidad", "Presencial")
+                        cap_tipo = st.session_state.get("cap_tipo", "")
+                        cap_dni = st.session_state.get("cap_dni", "")
+                        cap_nombres = st.session_state.get("cap_nombres", "")
+                        cap_puesto = st.session_state.get("cap_puesto", "")
+                        cap_area = st.session_state.get("cap_area", "")
+                        
+                        # Archivo adjunto (solo guardamos el nombre)
+                        archivo = st.session_state.get("cap_archivo")
+                        nombre_archivo = archivo.name if archivo is not None else "Ninguno"
+                        
+                        fecha_registro_sistema = str(pd.Timestamp.now())
+                        
+                        # ==========================================
+                        # TABLA 1: Capacitaciones
+                        # ==========================================
+                        df_cap = pd.DataFrame({
+                            "ID_Capacitacion": [id_sesion],
+                            "Nombre_de_la_Capacitacion": [str(cap_nombre)],
+                            "Fecha": [str(cap_fecha)],
+                            "N_Horas": [float(cap_horas)],
+                            "Modalidad": [str(cap_modalidad)],
+                            "Tienda": [str(cap_tienda)],
+                            "Nombre_Archivo_Adjunto": [str(nombre_archivo)],
+                            "Fecha_Carga_Sistema": [str(fecha_registro_sistema)]
+                        })
+                        
+                        # ==========================================
+                        # TABLA 2: Capacitadores
+                        # ==========================================
+                        df_instr = pd.DataFrame({
+                            "ID_Capacitacion": [id_sesion],
+                            "DNI": [str(cap_dni)],
+                            "Apellidos_y_Nombres": [str(cap_nombres)],
+                            "Tipo_Capacitador": [str(cap_tipo)],
+                            "Puesto": [str(cap_puesto)],
+                            "Area_Empresa": [str(cap_area)]
+                        })
+                        
+                        # ==========================================
+                        # TABLA 3: Asistentes
+                        # ==========================================
+                        df_asis = df_validos.copy()
+                        df_asis.insert(0, "ID_Capacitacion", id_sesion)
+                        
+                        # Asegurar todos a string y sin nulos
+                        for col in df_asis.columns:
+                            df_asis[col] = df_asis[col].astype(str)
+                            df_asis[col] = df_asis[col].replace(['nan', 'None', '<NA>', 'NaN'], '')
+                            
+                        # Limpiar nombres de columnas respetando formato visual de la app
+                        import re
+                        import unicodedata
+                        cols_limpias = []
+                        for col in df_asis.columns:
+                            c = unicodedata.normalize('NFKD', str(col)).encode('ascii', 'ignore').decode('ascii')
+                            c = re.sub(r'[^\w]', '_', c).strip('_')
+                            c = re.sub(r'_+', '_', c)
+                            if c and c[0].isdigit(): c = 'C_' + c
+                            cols_limpias.append(c)
+                        df_asis.columns = cols_limpias
+                        
+                        # 3. Enviar las 3 tablas a BigQuery
+                        dataset_id_full = f"{PROJECT_ID}.{DATASET_ID}"
+                        try:
+                            client.get_dataset(dataset_id_full)
+                        except Exception:
+                            dataset = bigquery.Dataset(dataset_id_full)
+                            client.create_dataset(dataset, timeout=30)
+                            
+                        job_config = bigquery.LoadJobConfig(
+                            write_disposition="WRITE_APPEND", 
+                            autodetect=True, 
+                        )
+                        
+                        # Guardar 1: Capacitación
+                        job_cap = client.load_table_from_dataframe(df_cap, TABLE_CAPACITACIONES, job_config=job_config)
+                        job_cap.result()
+                        
+                        # Guardar 2: Capacitador
+                        job_instr = client.load_table_from_dataframe(df_instr, TABLE_CAPACITADORES, job_config=job_config)
+                        job_instr.result()
+                        
+                        # Guardar 3: Asistentes
+                        job_asis = client.load_table_from_dataframe(df_asis, TABLE_ASISTENTES, job_config=job_config)
+                        job_asis.result()
+                        
+                        st.success(f"¡Se ha guardado el grupo exitosamente en las 3 tablas de BigQuery bajo el identificador {id_sesion}!")
+                        st.balloons()
+                        
+                        # 4. Automáticamente borrar la tabla visual para dejar espacio al siguiente grupo
+                        df_limpio = pd.DataFrame(columns=[
+                            "DNI", "Código Ofisis", "Apellidos y Nombres", "Cargo", "Área", "Tienda", "Género", "Tipo de contrato", "Edad"
+                        ])
+                        for i in range(900):
+                            df_limpio.loc[i] = ["", "", "", "", "", "", "", "", ""]
+                        st.session_state["df_asistentes"] = df_limpio
+                        
+                        # Forzar redibujado instantáneo de la pantalla limpia
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error crítico guardando en la nube BQ: {e}")
 
 # Si se ejecuta este archivo individualmente (fuera del consolidador), mostrar el formulario
 if __name__ == "__main__":
