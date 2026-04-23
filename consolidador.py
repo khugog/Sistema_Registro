@@ -181,7 +181,7 @@ st.write("Mantén un registro centralizado y actualizado alojado en Google BigQu
 # Splash Screen de entrada y prevencion de glitch DOM
 if "_primera_carga" not in st.session_state:
     st.markdown("""
-    <div id="splash_screen" style="position:fixed;inset:0;z-index:9999999;background:#0a1223;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:30px;animation: fadeout 0.5s ease-in 2.5s forwards;">
+    <div id="splash_screen" style="position:fixed;inset:0;z-index:9999999;background:#0a1223;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:30px;animation: fadeout 0.4s ease-in 0.8s forwards;">
         <div style="width:80px;height:80px;border:6px solid rgba(255,255,255,0.1);border-top-color:#3b82f6;border-radius:50%;animation:sp 1s linear infinite;"></div>
         <div style="color:white;font-size:24px;letter-spacing:2px;font-family:sans-serif;">INICIANDO SISTEMA...</div>
     </div>
@@ -400,8 +400,11 @@ with tab_registro:
             const btn = e.target.closest('button');
             if (!btn) return;
 
-            // Filtros de navegación
-            if (btn.closest('[data-testid="stTab"]') || btn.closest('[data-testid="stRadio"]')) return;
+            // Filtros de navegación ultra-estrictos
+            if (btn.closest('[data-testid="stTab"]') || 
+                btn.closest('[data-testid="stRadio"]') || 
+                btn.getAttribute('role') === 'tab' ||
+                btn.id?.includes('tab')) return;
             
             const texto = btn.innerText.toUpperCase();
             
