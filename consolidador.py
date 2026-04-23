@@ -450,7 +450,7 @@ with tab_registro:
                     if (app.getAttribute('data-stale') !== 'true') {
                         removeLoader();
                     }
-                }, 30000); // Retraso aumentado a 30 segundos según solicitud
+                }, 500); // Se cierra inmediatamente despues de terminar (500ms)
             }
         });
 
