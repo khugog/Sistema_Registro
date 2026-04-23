@@ -91,8 +91,9 @@ def sanitizar_dataframe(df_sucio):
             df_sucio[c] = df_sucio[c].astype(str).str.replace(r'\.0$', '', regex=True).replace(['nan', 'None'], '')
     return df_sucio
 
+# La carga del maestro se movió dentro de las pestañas para acelerar el inicio del sistema
 if "df_maestro" not in st.session_state:
-    st.session_state["df_maestro"] = cargar_maestro()
+    st.session_state["df_maestro"] = pd.DataFrame()
 
 # ==========================================
 # 3. DISEÑO Y NAVEGACIÓN (Original)
@@ -129,6 +130,11 @@ st.divider()
 # ==========================================
 
 with tab1:
+    # CARGA BAJO DEMANDA: Solo carga si el usuario entra a esta pestaña y no está cargado
+    if st.session_state["df_maestro"].empty:
+        with st.spinner("Consultando BigQuery..."):
+            st.session_state["df_maestro"] = cargar_maestro()
+            
     df_actual = st.session_state["df_maestro"]
     if df_actual.empty:
         st.info("ℹ️ Base de datos vacía en BigQuery.")

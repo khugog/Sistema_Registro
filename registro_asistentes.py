@@ -143,23 +143,51 @@ def render_registro():
             st.info("ℹ️ No hay DNIs nuevos para validar.")
         else:
             try:
-                # Usar referencia directa para velocidad instantánea
-                df_bq = st.session_state.get("df_maestro", pd.DataFrame())
+                # OPTIMIZACIÓN SUPREMA: Consultar directamente a BigQuery solo por los DNIs necesarios
+                client = get_bq_client()
                 bq_dict = {}
-                if not df_bq.empty:
-                    # Detectar dinámicamente la columna del DNI
-                    col_dni = None
-                    for c in df_bq.columns:
-                        if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
-                            col_dni = c
-                            break
+                
+                if client:
+                    # 1. Identificar la columna de DNI (usamos una lista de posibles nombres comunes)
+                    # En una base de datos real, esto suele ser fijo, pero mantenemos la flexibilidad.
+                    dnis_query = ", ".join([f"'{d}'" for d in dnis_pendientes])
                     
-                    if col_dni:
-                        # Convertir columna a string para comparar
-                        df_bq[col_dni] = df_bq[col_dni].astype(str).str.replace(r'\.0$', '', regex=True)
-                        # OPTIMIZACIÓN: Solo convertir a diccionario los DNIs que vamos a validar
-                        df_filtrado = df_bq[df_bq[col_dni].isin(dnis_pendientes)]
-                        bq_dict = df_filtrado.set_index(col_dni).to_dict('index')
+                    # Intentamos obtener los nombres de las columnas primero o usamos un SELECT * limitado
+                    # Para máxima velocidad, consultamos solo lo que necesitamos
+                    query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE "
+                    
+                    # Buscamos la columna de DNI en el esquema si es la primera vez, 
+                    # o usamos una lógica de OR para mayor compatibilidad
+                    columnas_dni = ['numero_de_documento', 'dni', 'documento', 'identidad']
+                    where_clause = " OR ".join([f"{col} IN ({dnis_query})" for col in columnas_dni])
+                    
+                    # Nota: Esto asume que al menos una de estas columnas existe. 
+                    # En BigQuery, es mejor saber el nombre exacto, pero esto es un buen fallback.
+                    full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {where_clause}"
+                    
+                    # Si ya tenemos el df_maestro en memoria, intentamos sacar el nombre de la columna de ahí
+                    df_maestro_mem = st.session_state.get("df_maestro", pd.DataFrame())
+                    if not df_maestro_mem.empty:
+                        col_real = None
+                        for c in df_maestro_mem.columns:
+                            if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
+                                col_real = c
+                                break
+                        if col_real:
+                            full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {col_real} IN ({dnis_query})"
+                    
+                    df_res = client.query(full_query).to_dataframe()
+                    
+                    if not df_res.empty:
+                        # Detectar de nuevo la columna en el resultado para indexar
+                        col_idx = None
+                        for c in df_res.columns:
+                            if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
+                                col_idx = c
+                                break
+                        if col_idx:
+                            df_res[col_idx] = df_res[col_idx].astype(str).str.replace(r'\.0$', '', regex=True)
+                            bq_dict = df_res.set_index(col_idx).to_dict('index')
 
                 encontrados = 0
                 for idx, dni in indices_pendientes:
