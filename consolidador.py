@@ -203,8 +203,8 @@ with tab3:
                 `;
                 pd.body.appendChild(div);
                 
-                // FAILSAFE: Si por algo la red falla, el loader se quita en 40 segundos máximo
-                setTimeout(removeLoader, 40000);
+                // FAILSAFE: Si por algo la red falla, el loader se quita en 50 segundos máximo
+                setTimeout(removeLoader, 50000);
             }
         };
 
