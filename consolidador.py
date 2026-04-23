@@ -53,7 +53,9 @@ def get_bq_client():
             return None
     return None
 
+@st.cache_data(ttl=600)
 def cargar_maestro():
+    """Descarga el consolidado desde BigQuery y lo cachea por 10 minutos."""
     client = get_bq_client()
     if not client: return pd.DataFrame() 
     try:

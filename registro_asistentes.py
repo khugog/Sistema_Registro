@@ -155,8 +155,11 @@ def render_registro():
                             break
                     
                     if col_dni:
+                        # Convertir columna a string para comparar
                         df_bq[col_dni] = df_bq[col_dni].astype(str).str.replace(r'\.0$', '', regex=True)
-                        bq_dict = df_bq.set_index(col_dni).to_dict('index')
+                        # OPTIMIZACIÓN: Solo convertir a diccionario los DNIs que vamos a validar
+                        df_filtrado = df_bq[df_bq[col_dni].isin(dnis_pendientes)]
+                        bq_dict = df_filtrado.set_index(col_dni).to_dict('index')
 
                 encontrados = 0
                 for idx, dni in indices_pendientes:
