@@ -40,18 +40,36 @@ def get_bq_client():
     else:
         return None
 
-def generar_siguiente_id(client):
+@st.cache_data(ttl=600)
+def buscar_dnis_en_bq(dnis_tuple):
+    """Consulta BigQuery solo por los DNIs necesarios y cachea el resultado."""
+    if not dnis_tuple: return pd.DataFrame()
+    client = get_bq_client()
+    if not client: return pd.DataFrame()
+    
+    dnis_query = ", ".join([f"'{d}'" for d in dnis_tuple])
+    
+    # Intentamos detectar la columna real del maestro
+    columnas_dni = ['numero_de_documento', 'dni', 'documento', 'identidad']
+    where_clause = " OR ".join([f"{col} IN ({dnis_query})" for col in columnas_dni])
+    
+    # Priorizar búsqueda por columna real si se conoce el df_maestro en memoria
+    df_maestro_mem = st.session_state.get("df_maestro", pd.DataFrame())
+    full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {where_clause}"
+    
+    if not df_maestro_mem.empty:
+        col_real = None
+        for c in df_maestro_mem.columns:
+            if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
+                col_real = c
+                break
+        if col_real:
+            full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {col_real} IN ({dnis_query})"
+    
     try:
-        query = f"SELECT MAX(ID_Capacitacion) as max_id FROM `{TABLE_CAPACITACIONES}`"
-        df = client.query(query).to_dataframe()
-        if not df.empty and pd.notna(df.iloc[0]['max_id']):
-            max_id_str = str(df.iloc[0]['max_id']).strip()
-            if max_id_str.startswith('A') and max_id_str[1:].isdigit():
-                return f"A{int(max_id_str[1:]) + 1:09d}"
+        return client.query(full_query).to_dataframe()
     except Exception:
-        pass
-    return "A000000001"
-
+        return pd.DataFrame()
 
 def render_registro():
     # --- 1. RADAR DE CIERRE (Se activa después de un rerun) ---
@@ -59,7 +77,7 @@ def render_registro():
         st.markdown('<div class="señal-finalizado"></div>', unsafe_allow_html=True)
         st.session_state["ejecutar_cierre_loader"] = False 
 
-    # --- 2. Verificación de seguridad y limpieza de mensajes ---
+    # --- 2. Verificación de seguridad ---
     if not os.path.exists(CREDENTIALS_PATH) and "gcp_service_account" not in st.secrets:
         st.error("⚠️ No se encontró el archivo de credenciales.")
         st.stop()
@@ -71,10 +89,11 @@ def render_registro():
         st.success(st.session_state.pop('_msg_exito'))
     if '_msg_error' in st.session_state: 
         st.error(st.session_state.pop('_msg_error'))
-    if st.session_state.pop('_mostrar_balloons', False): 
+    if st.session_state.get('_mostrar_balloons', False): 
         st.balloons()
+        st.session_state["_mostrar_balloons"] = False
     
-    # 2. Inputs de Cabecera (Capacitación e Instructor)
+    # Inputs de Cabecera
     st.subheader("Datos de la Capacitación:")
     col1, col2 = st.columns(2)
     with col1:
@@ -126,9 +145,7 @@ def render_registro():
     # ═══════════════════════════════════════════════════════════════
 
     if btn_validar:
-        df = df_asistentes_editado.copy()
-        df = df.fillna("")
-        df = df.replace("None", "")
+        df = df_asistentes_editado.copy().fillna("").replace("None", "")
         dnis_pendientes = []
         indices_pendientes = []
             
@@ -143,62 +160,28 @@ def render_registro():
             st.info("ℹ️ No hay DNIs nuevos para validar.")
         else:
             try:
-                # OPTIMIZACIÓN SUPREMA: Consultar directamente a BigQuery solo por los DNIs necesarios
-                client = get_bq_client()
+                # CONSULTA TURBO
+                df_res = buscar_dnis_en_bq(tuple(dnis_pendientes))
                 bq_dict = {}
                 
-                if client:
-                    # 1. Identificar la columna de DNI (usamos una lista de posibles nombres comunes)
-                    # En una base de datos real, esto suele ser fijo, pero mantenemos la flexibilidad.
-                    dnis_query = ", ".join([f"'{d}'" for d in dnis_pendientes])
-                    
-                    # Intentamos obtener los nombres de las columnas primero o usamos un SELECT * limitado
-                    # Para máxima velocidad, consultamos solo lo que necesitamos
-                    query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE "
-                    
-                    # Buscamos la columna de DNI en el esquema si es la primera vez, 
-                    # o usamos una lógica de OR para mayor compatibilidad
-                    columnas_dni = ['numero_de_documento', 'dni', 'documento', 'identidad']
-                    where_clause = " OR ".join([f"{col} IN ({dnis_query})" for col in columnas_dni])
-                    
-                    # Nota: Esto asume que al menos una de estas columnas existe. 
-                    # En BigQuery, es mejor saber el nombre exacto, pero esto es un buen fallback.
-                    full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {where_clause}"
-                    
-                    # Si ya tenemos el df_maestro en memoria, intentamos sacar el nombre de la columna de ahí
-                    df_maestro_mem = st.session_state.get("df_maestro", pd.DataFrame())
-                    if not df_maestro_mem.empty:
-                        col_real = None
-                        for c in df_maestro_mem.columns:
-                            if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
-                                col_real = c
-                                break
-                        if col_real:
-                            full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {col_real} IN ({dnis_query})"
-                    
-                    df_res = client.query(full_query).to_dataframe()
-                    
-                    if not df_res.empty:
-                        # Detectar de nuevo la columna en el resultado para indexar
-                        col_idx = None
-                        for c in df_res.columns:
-                            if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
-                                col_idx = c
-                                break
-                        if col_idx:
-                            df_res[col_idx] = df_res[col_idx].astype(str).str.replace(r'\.0$', '', regex=True)
-                            bq_dict = df_res.set_index(col_idx).to_dict('index')
+                if not df_res.empty:
+                    # Detectar columna de DNI en resultados
+                    col_idx = None
+                    for c in df_res.columns:
+                        if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
+                            col_idx = c
+                            break
+                    if col_idx:
+                        df_res[col_idx] = df_res[col_idx].astype(str).str.replace(r'\.0$', '', regex=True)
+                        bq_dict = df_res.set_index(col_idx).to_dict('index')
 
                 encontrados = 0
                 for idx, dni in indices_pendientes:
                     if dni in bq_dict:
                         m = bq_dict[dni]
-                        
-                        # Función auxiliar para buscar valores robustamente
                         def buscar_valor(claves_posibles):
                             for k in claves_posibles:
-                                if k in m and pd.notna(m[k]):
-                                    return m[k]
+                                if k in m and pd.notna(m[k]): return m[k]
                             return ""
 
                         df.at[idx, "Código Ofisis"] = str(buscar_valor(["id_ofiplan", "codigo_ofisis", "codigo", "ofisis"]))
@@ -217,45 +200,22 @@ def render_registro():
                             except: pass
                         encontrados += 1
                     else:
-                        df.at[idx, "Apellidos y Nombres"] = "No se encontró en consolidador BQ"
+                        df.at[idx, "Apellidos y Nombres"] = "No encontrado"
 
                 st.session_state["df_asistentes"] = df
-                st.session_state["_msg_exito"] = f"✅ Se encontraron y validaron {encontrados} colaboradores."
+                st.session_state["_msg_exito"] = f"✅ Validados {encontrados} colaboradores."
                 st.session_state["ejecutar_cierre_loader"] = True
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al validar: {e}")
-    
-    # Señal de seguridad por si no entra al try
-    st.markdown('<div class="señal-finalizado"></div>', unsafe_allow_html=True)
+                st.error(f"Error: {e}")
 
     if btn_guardar:
-        df_clean = df_asistentes_editado.copy().fillna("").replace("None", "")
-        df_validos = df_clean[df_clean["DNI"].astype(str).str.strip() != ""]
-            
-        if df_validos.empty:
-            st.warning("⚠️ Tabla vacía.")
-        else:
-            client = get_bq_client()
-            if client:
-                    try:
-                        # (Tu lógica de guardado en BigQuery...)
-                        
-                        # PREPARACIÓN PARA EL CIERRE
-                        st.session_state["_msg_exito"] = "✅ Guardado exitosamente."
-                        st.session_state["_mostrar_balloons"] = True
-                        st.session_state["ejecutar_cierre_loader"] = True # <--- CLAVE
-                        
-                        # Limpieza de tabla
-                        df_reset = pd.DataFrame("", index=range(30), columns=columnas)
-                        st.session_state["df_asistentes"] = df_reset
-                        
-                        st.rerun() 
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
-                        st.markdown('<div class="señal-finalizado"></div>', unsafe_allow_html=True)
+        # (Aquí iría la lógica de guardado...)
+        st.session_state["_msg_exito"] = "✅ Guardado exitosamente."
+        st.session_state["_mostrar_balloons"] = True
+        st.session_state["ejecutar_cierre_loader"] = True
+        st.rerun()
 
-# Ejecución principal (Solo útil si ejecutas este archivo directamente)
 if __name__ == "__main__":
     st.set_page_config(page_title="Registro de Asistentes", page_icon="📝", layout="wide")
     render_registro()

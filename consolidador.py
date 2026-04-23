@@ -221,23 +221,40 @@ with tab3:
         pd.addEventListener('click', handleManualClick, true);
 
         // LÓGICA DE CIERRE INTELIGENTE:
-        // No se cierra inmediatamente, espera a que Streamlit esté 'IDLE' por al menos 500ms
         let idleCheck;
-        const observer = new MutationObserver(() => {
+        const checkAndClose = () => {
             const isStale = app.getAttribute('data-stale') === 'true';
-            if (!isStale) {
+            const señal = pd.querySelector('.señal-finalizado');
+            
+            if (!isStale || señal) {
                 clearTimeout(idleCheck);
                 idleCheck = setTimeout(() => {
-                    if (app.getAttribute('data-stale') !== 'true') {
+                    if (app.getAttribute('data-stale') !== 'true' || señal) {
                         removeLoader();
+                        if (señal) señal.remove();
                     }
-                }, 500); // Se cierra inmediatamente (500ms)
+                }, 400); 
             }
-        });
+        };
+
+        const observer = new MutationObserver(checkAndClose);
 
         if (app) {
             observer.observe(app, { attributes: true, attributeFilter: ['data-stale'] });
+            observer.observe(pd.body, { childList: true, subtree: true });
         }
+        
+        // POLLING DE RESPALDO (Cada 500ms verifica si ya terminó)
+        const poll = setInterval(() => {
+            if (!pd.getElementById('manual-loader')) {
+                clearInterval(poll);
+                return;
+            }
+            checkAndClose();
+        }, 500);
+
+        // FAILSAFE REDUCIDO: 15 segundos es más que suficiente para una consulta de DNI
+        setTimeout(removeLoader, 15000);
     </script>
     """, height=0)
 
