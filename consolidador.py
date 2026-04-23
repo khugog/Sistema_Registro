@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
@@ -10,6 +11,21 @@ import base64
 
 # Configuración de la página
 st.set_page_config(page_title="Consolidador de Colaboradores", page_icon="👥", layout="wide")
+
+# Ocultar cargadores nativos de Streamlit y evitar el oscurecimiento al escribir
+st.markdown("""
+<style>
+div[data-testid="stStatusWidget"], .stSpinner, circle { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+
+/* Evitar que la pantalla se oscurezca (dimming) al escribir en los inputs */
+[data-stale="true"] {
+    opacity: 1 !important;
+    filter: none !important;
+    transition: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # CONFIGURACIÓN BIGQUERY
@@ -351,6 +367,83 @@ with tab_carga:
 # PESTAÑA 3: REGISTRO DE ASISTENTES
 # ==========================================
 with tab_registro:
-    registro_asistentes.render_registro()
+    # --- SCRIPT DE CARGA PROFESIONAL (MEJORADO) ---
+    components.html("""
+    <script>
+        const pd = window.parent.document;
+        const app = pd.querySelector('.stApp');
+        
+        const removeLoader = () => {
+            const loader = pd.getElementById('manual-loader');
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => { if(loader) loader.remove(); }, 300);
+            }
+        };
 
+        const handleManualClick = (e) => {
+            const btn = e.target.closest('button');
+            if (!btn) return;
+
+            // Filtros de navegación
+            if (btn.closest('[data-testid="stTab"]') || btn.closest('[data-testid="stRadio"]')) return;
+            
+            const texto = btn.innerText.toUpperCase();
+            
+            // DISPARADOR: Solo para Validar, Guardar y Descargar
+            if (texto.includes('VALIDAR') || texto.includes('GUARDAR') || texto.includes('DESCARGAR')) {
+                if (pd.getElementById('manual-loader')) return;
+
+                const div = pd.createElement('div');
+                div.id = 'manual-loader';
+                
+                // Fondo oscuro (Overlay)
+                div.style.cssText = `
+                    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); 
+                    z-index: 999999; display: flex; flex-direction: column; 
+                    align-items: center; justify-content: center; 
+                    transition: opacity 0.3s ease; opacity: 1;
+                `;
+                
+                // Cuadro de procesamiento
+                div.innerHTML = `
+                    <div style="background: #111; padding: 45px 70px; border-radius: 15px; border: 1px solid #333; display: flex; flex-direction: column; align-items: center; box-shadow: 0 20px 50px rgba(0,0,0,0.9);">
+                        <div style="width:65px; height:65px; border:6px solid rgba(59, 130, 246, 0.1); border-top:6px solid #3b82f6; border-radius:50%; animation: spin 0.8s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;"></div>
+                        <p style="margin-top:30px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; letter-spacing: 3px; font-weight: 600; color: white; font-size: 15px; text-align: center;">PROCESANDO REGISTRO...</p>
+                    </div>
+                    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+                `;
+                pd.body.appendChild(div);
+                
+                // FAILSAFE: Si por algo la red falla, el loader se quita en 35 segundos máximo
+                setTimeout(removeLoader, 35000);
+            }
+        };
+
+        // Escuchar clics
+        pd.removeEventListener('click', handleManualClick);
+        pd.addEventListener('click', handleManualClick, true);
+
+        // LÓGICA DE CIERRE INTELIGENTE:
+        // No se cierra inmediatamente, espera a que Streamlit esté 'IDLE' por al menos 500ms
+        let idleCheck;
+        const observer = new MutationObserver(() => {
+            const isStale = app.getAttribute('data-stale') === 'true';
+            if (!isStale) {
+                clearTimeout(idleCheck);
+                idleCheck = setTimeout(() => {
+                    if (app.getAttribute('data-stale') !== 'true') {
+                        removeLoader();
+                    }
+                }, 30000); // Retraso aumentado a 30 segundos según solicitud
+            }
+        });
+
+        if (app) {
+            observer.observe(app, { attributes: true, attributeFilter: ['data-stale'] });
+        }
+    </script>
+    """, height=0)
+
+    registro_asistentes.render_registro()
 
