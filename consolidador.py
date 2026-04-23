@@ -92,7 +92,7 @@ def sanitizar_dataframe(df_sucio):
     return df_sucio
 
 if "df_maestro" not in st.session_state:
-    st.session_state["df_maestro"] = cargar_maestro()
+    st.session_state["df_maestro"] = pd.DataFrame()
 
 # ==========================================
 # 3. DISEÑO Y NAVEGACIÓN (Original)
@@ -127,6 +127,11 @@ st.divider()
 # ==========================================
 
 with tab1:
+    # CARGA BAJO DEMANDA: Solo descarga si el usuario entra a ver la tabla completa
+    if st.session_state["df_maestro"].empty:
+        with st.spinner("Sincronizando con BigQuery..."):
+            st.session_state["df_maestro"] = cargar_maestro()
+            
     df_actual = st.session_state["df_maestro"]
     if df_actual.empty:
         st.info("ℹ️ Base de datos vacía en BigQuery.")
