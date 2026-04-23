@@ -300,7 +300,8 @@ with tab_carga:
                         f"- Colaboradores preexistentes (actualizados/omitidos): {ra}\n"
                         f"- Total en la nueva base histórica: {tot}")
             elif if_can_merge and st.button("🚀 Guardar Definitivamente en BigQuery", type="primary"):
-                with st.spinner("Conectando con Google Cloud y procesando masivamente..."):
+                # Se eliminó st.spinner para evitar glitches y mejorar velocidad
+                if True:
                     
                     if df_maestro_actual.empty:
                         df_final = df_nuevo.drop_duplicates(subset=[columna_clave_nuevo], keep='first')

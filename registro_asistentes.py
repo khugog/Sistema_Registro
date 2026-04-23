@@ -143,7 +143,8 @@ def render_registro():
             st.info("ℹ️ No hay DNIs nuevos para validar.")
         else:
             try:
-                df_bq = st.session_state.get("df_maestro", pd.DataFrame()).copy()
+                # Usar referencia directa para velocidad instantánea
+                df_bq = st.session_state.get("df_maestro", pd.DataFrame())
                 bq_dict = {}
                 if not df_bq.empty:
                     # Detectar dinámicamente la columna del DNI
