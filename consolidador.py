@@ -8,6 +8,14 @@ import re
 from io import BytesIO
 import registro_asistentes
 
+@st.cache_data
+def generar_excel_cacheado(df):
+    """Genera el Excel solo una vez y lo guarda en caché para evitar lag."""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False)
+    return output.getvalue()
+
 # 1. Configuración de la página
 st.set_page_config(page_title="Consolidador de Colaboradores", page_icon="👥", layout="wide")
 
@@ -118,7 +126,7 @@ opciones_nav = [
     "📝 Registro de Asistentes"
 ]
 
-menu = st.radio("Navegación", opciones_nav, horizontal=True, label_visibility="collapsed")
+tab1, tab2, tab3 = st.tabs(opciones_nav)
 
 st.divider()
 
@@ -126,7 +134,7 @@ st.divider()
 # 4. CONTENIDO POR PESTAÑA
 # ==========================================
 
-if menu == "📊 Ver Consolidado Maestro":
+with tab1:
     # CARGA BAJO DEMANDA
     if st.session_state["df_maestro"].empty:
         with st.spinner("Sincronizando con BigQuery..."):
@@ -139,28 +147,128 @@ if menu == "📊 Ver Consolidado Maestro":
         st.metric(label="Total de Colaboradores Registrados", value=len(df_actual))
         st.dataframe(df_actual, use_container_width=True)
         
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_actual.to_excel(writer, index=False)
-        st.download_button("📥 Descargar Consolidado (Excel)", data=output.getvalue(), file_name="consolidado.xlsx", type="primary")
+        # AQUÍ ESTÁ EL ARREGLO DE VELOCIDAD:
+        # Llamamos a la función cacheada. Ya no se procesará en cada clic.
+        excel_data = generar_excel_cacheado(df_actual)
+        
+        st.download_button(
+            "📥 Descargar Consolidado (Excel)", 
+            data=excel_data, 
+            file_name="consolidado.xlsx", 
+            type="primary"
+        )
 
-elif menu == "🔄 Cargar Nuevos Archivos":
+with tab2:
     st.subheader("Fusión de datos con BigQuery")
     archivo_nuevo = st.file_uploader("Sube el archivo Excel o CSV", type=["csv", "xlsx"])
     if archivo_nuevo:
+        # Lógica de carga
         if archivo_nuevo.name.endswith('.csv'): df_n = pd.read_csv(archivo_nuevo, dtype=str)
         else: df_n = pd.read_excel(archivo_nuevo, dtype=str)
         
         if st.button("🚀 Guardar Definitivamente en BigQuery", type="primary"):
             df_n = sanitizar_dataframe(df_n)
+            # Eliminar duplicados antes de subir
             df_n = df_n.drop_duplicates()
             if guardar_maestro(df_n):
                 st.success("¡Datos actualizados en la nube!")
                 st.session_state["df_maestro"] = df_n
 
-elif menu == "📝 Registro de Asistentes":
+with tab3:
     # --- SCRIPT DE CARGA PROFESIONAL (MEJORADO) ---
-    # (Pega aquí todo tu bloque components.html con el Javascript)
-    
+    components.html("""
+    <script>
+        const pd = window.parent.document;
+        const app = pd.querySelector('.stApp');
+        
+        const removeLoader = () => {
+            const loader = pd.getElementById('manual-loader');
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => { if(loader) loader.remove(); }, 300);
+            }
+        };
+
+        const handleManualClick = (e) => {
+            const btn = e.target.closest('button');
+            if (!btn) return;
+
+            // Filtros de navegación
+            if (btn.closest('[data-testid="stTab"]') || btn.closest('[data-testid="stRadio"]')) return;
+            
+            const texto = btn.innerText.toUpperCase();
+            
+            // DISPARADOR: Solo para Validar, Guardar y Descargar
+            if (texto.includes('VALIDAR') || texto.includes('GUARDAR') || texto.includes('DESCARGAR')) {
+                if (pd.getElementById('manual-loader')) return;
+
+                const div = pd.createElement('div');
+                div.id = 'manual-loader';
+                
+                // Fondo oscuro (Overlay)
+                div.style.cssText = `
+                    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); 
+                    z-index: 999999; display: flex; flex-direction: column; 
+                    align-items: center; justify-content: center; 
+                    transition: opacity 0.3s ease; opacity: 1;
+                `;
+                
+                // Cuadro de procesamiento
+                div.innerHTML = `
+                    <div style="background: #111; padding: 45px 70px; border-radius: 15px; border: 1px solid #333; display: flex; flex-direction: column; align-items: center; box-shadow: 0 20px 50px rgba(0,0,0,0.9);">
+                        <div style="width:65px; height:65px; border:6px solid rgba(59, 130, 246, 0.1); border-top:6px solid #3b82f6; border-radius:50%; animation: spin 0.8s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;"></div>
+                        <p style="margin-top:30px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; letter-spacing: 3px; font-weight: 600; color: white; font-size: 15px; text-align: center;">PROCESANDO REGISTRO...</p>
+                    </div>
+                    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+                `;
+                pd.body.appendChild(div);
+                
+                // FAILSAFE: Si por algo la red falla, el loader se quita en 50 segundos máximo
+                setTimeout(removeLoader, 50000);
+            }
+        };
+
+        // Escuchar clics
+        pd.removeEventListener('click', handleManualClick);
+        pd.addEventListener('click', handleManualClick, true);
+
+        // LÓGICA DE CIERRE INTELIGENTE:
+        let idleCheck;
+        const checkAndClose = () => {
+            const isStale = app.getAttribute('data-stale') === 'true';
+            const señal = pd.querySelector('.señal-finalizado');
+            
+            if (!isStale || señal) {
+                clearTimeout(idleCheck);
+                idleCheck = setTimeout(() => {
+                    if (app.getAttribute('data-stale') !== 'true' || señal) {
+                        removeLoader();
+                        if (señal) señal.remove();
+                    }
+                }, 400); 
+            }
+        };
+
+        const observer = new MutationObserver(checkAndClose);
+
+        if (app) {
+            observer.observe(app, { attributes: true, attributeFilter: ['data-stale'] });
+            observer.observe(pd.body, { childList: true, subtree: true });
+        }
+        
+        // POLLING DE RESPALDO (Cada 500ms verifica si ya terminó)
+        const poll = setInterval(() => {
+            if (!pd.getElementById('manual-loader')) {
+                clearInterval(poll);
+                return;
+            }
+            checkAndClose();
+        }, 500);
+
+        // FAILSAFE REDUCIDO: 15 segundos es más que suficiente para una consulta de DNI
+        setTimeout(removeLoader, 15000);
+    </script>
+    """, height=0)
+
     # Renderizado del módulo de registro
     registro_asistentes.render_registro()
