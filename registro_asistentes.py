@@ -47,28 +47,28 @@ def buscar_dnis_en_bq(dnis_tuple):
     client = get_bq_client()
     if not client: return pd.DataFrame()
     
-    dnis_query = ", ".join([f"'{d}'" for d in dnis_tuple])
-    
-    # Intentamos detectar la columna real del maestro
-    columnas_dni = ['numero_de_documento', 'dni', 'documento', 'identidad']
-    where_clause = " OR ".join([f"{col} IN ({dnis_query})" for col in columnas_dni])
-    
-    # Priorizar búsqueda por columna real si se conoce el df_maestro en memoria
-    df_maestro_mem = st.session_state.get("df_maestro", pd.DataFrame())
-    full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {where_clause}"
-    
-    if not df_maestro_mem.empty:
-        col_real = None
-        for c in df_maestro_mem.columns:
-            if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
-                col_real = c
-                break
-        if col_real:
-            full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {col_real} IN ({dnis_query})"
-    
     try:
+        # OBTENER EL NOMBRE REAL DE LAS COLUMNAS (Para evitar errores de 'columna no encontrada')
+        table = client.get_table(TABLE_FULL_NAME)
+        nombres_columnas = [field.name for field in table.schema]
+        
+        # Identificar cuál es la columna de DNI en esta tabla específica
+        posibles_dni = ['numero_de_documento', 'dni', 'documento', 'identidad', 'cedula']
+        col_dni_real = next((c for c in nombres_columnas if c.lower() in posibles_dni), None)
+        
+        if not col_dni_real:
+            # Fallback: buscar cualquier columna que contenga la palabra
+            col_dni_real = next((c for c in nombres_columnas if any(p in c.lower() for p in posibles_dni)), None)
+        
+        if not col_dni_real:
+            return pd.DataFrame() # No se pudo identificar la columna de DNI
+            
+        dnis_query = ", ".join([f"'{d}'" for d in dnis_tuple])
+        full_query = f"SELECT * FROM `{TABLE_FULL_NAME}` WHERE {col_dni_real} IN ({dnis_query})"
+        
         return client.query(full_query).to_dataframe()
-    except Exception:
+    except Exception as e:
+        # Opcional: imprimir error para debug si fuera necesario
         return pd.DataFrame()
 
 def render_registro():
