@@ -223,8 +223,8 @@ with tab3:
                 `;
                 pd.body.appendChild(div);
                 
-                // FAILSAFE: Si por algo la red falla, el loader se quita en 50 segundos máximo
-                setTimeout(removeLoader, 50000);
+                // FAILSAFE: Si por algo la red falla, el loader se quita en 15 segundos máximo
+                setTimeout(removeLoader, 15000);
             }
         };
 
@@ -265,8 +265,7 @@ with tab3:
             checkAndClose();
         }, 500);
 
-        // FAILSAFE REDUCIDO: 15 segundos es más que suficiente para una consulta de DNI
-        setTimeout(removeLoader, 15000);
+
     </script>
     """, height=0)
 

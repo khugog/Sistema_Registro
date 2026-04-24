@@ -71,6 +71,19 @@ def buscar_dnis_en_bq(dnis_tuple):
         # Opcional: imprimir error para debug si fuera necesario
         return pd.DataFrame()
 
+def guardar_en_bq(df, table_id):
+    """Sube un DataFrame a BigQuery con disposición APPEND."""
+    client = get_bq_client()
+    if client is None: return False
+    try:
+        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
+        job = client.load_table_from_dataframe(df, table_id, job_config=job_config)
+        job.result()
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar en {table_id}: {e}")
+        return False
+
 def render_registro():
     # --- 1. RADAR DE CIERRE (Se activa después de un rerun) ---
     if st.session_state.get("ejecutar_cierre_loader"):
@@ -210,11 +223,80 @@ def render_registro():
                 st.error(f"Error: {e}")
 
     if btn_guardar:
-        # (Aquí iría la lógica de guardado...)
-        st.session_state["_msg_exito"] = "✅ Guardado exitosamente."
-        st.session_state["_mostrar_balloons"] = True
-        st.session_state["ejecutar_cierre_loader"] = True
-        st.rerun()
+        # 1. Validaciones básicas
+        if not st.session_state.get("cap_nombre") or not st.session_state.get("cap_dni"):
+            st.warning("⚠️ Por favor, completa el Nombre de la Capacitación y el DNI del Capacitador.")
+            st.stop()
+
+        # 2. Generar ID de Capacitación único
+        id_cap = f"CAP-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:4]}"
+
+        # 3. Preparar Datos de Capacitación
+        df_cap = pd.DataFrame([{
+            "ID_Capacitacion": id_cap,
+            "Nombre_de_la_Capacitacion": st.session_state["cap_nombre"],
+            "Fecha": str(st.session_state["cap_fecha"]),
+            "N_Horas": float(st.session_state["cap_hora"]),
+            "Modalidad": st.session_state["cap_modalidad"],
+            "Tienda": st.session_state["cap_tienda"],
+            "Nombre_Archivo_Adjunto": st.session_state["cap_archivo"].name if st.session_state["cap_archivo"] else "",
+            "Fecha_Carga_Sistema": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }])
+
+        # 4. Preparar Datos del Capacitador
+        df_coach = pd.DataFrame([{
+            "ID_Capacitacion": id_cap,
+            "DNI": str(st.session_state["cap_dni"]),
+            "Apellidos_y_Nombres": st.session_state["cap_instructor_nombres"],
+            "Tipo_Capacitador": st.session_state["cap_tipo"],
+            "Puesto": st.session_state["cap_puesto"],
+            "Area_Empresa": st.session_state["cap_area_empresa"]
+        }])
+
+        # 5. Preparar Lista de Asistentes
+        df_asist = df_asistentes_editado.copy().fillna("").replace("None", "")
+        # Filtrar solo los que tienen DNI
+        df_asist = df_asist[df_asist["DNI"].astype(str).str.strip() != ""]
+        
+        if df_asist.empty:
+            st.warning("⚠️ No hay asistentes en la lista para guardar.")
+            st.stop()
+            
+        # Renombrar columnas para que coincidan con BigQuery
+        mapping_cols = {
+            "DNI": "DNI",
+            "Código Ofisis": "Codigo_Ofisis",
+            "Apellidos y Nombres": "Apellidos_y_Nombres",
+            "Cargo": "Cargo",
+            "Área": "Area",
+            "Tienda": "Tienda",
+            "Género": "Genero",
+            "Tipo de contrato": "Tipo_de_contrato",
+            "Edad": "Edad"
+        }
+        df_asist = df_asist.rename(columns=mapping_cols)
+        df_asist["ID_Capacitacion"] = id_cap
+        
+        # Asegurar que todas las columnas existan (por si acaso el editor cambió algo)
+        for col in ["Codigo_Ofisis", "Apellidos_y_Nombres", "Cargo", "Area", "Tienda", "Genero", "Tipo_de_contrato", "Edad"]:
+            if col not in df_asist.columns:
+                df_asist[col] = ""
+
+        # 6. Ejecutar Guardado
+        with st.spinner("Guardando en BigQuery..."):
+            exito1 = guardar_en_bq(df_cap, TABLE_CAPACITACIONES)
+            exito2 = guardar_en_bq(df_coach, TABLE_CAPACITADORES)
+            exito3 = guardar_en_bq(df_asist, TABLE_ASISTENTES)
+
+            if exito1 and exito2 and exito3:
+                st.session_state["_msg_exito"] = "✅ Registro completo guardado exitosamente en BigQuery."
+                st.session_state["_mostrar_balloons"] = True
+                st.session_state["ejecutar_cierre_loader"] = True
+                # Limpiar formulario (opcional, aquí reiniciamos el DF)
+                del st.session_state["df_asistentes"]
+                st.rerun()
+            else:
+                st.error("❌ Hubo un error al guardar algunos datos. Por favor verifica la conexión.")
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Registro de Asistentes", page_icon="📝", layout="wide")
