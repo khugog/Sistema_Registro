@@ -292,8 +292,19 @@ def render_registro():
                 st.session_state["_msg_exito"] = "✅ Registro completo guardado exitosamente en BigQuery."
                 st.session_state["_mostrar_balloons"] = True
                 st.session_state["ejecutar_cierre_loader"] = True
-                # Limpiar formulario (opcional, aquí reiniciamos el DF)
-                del st.session_state["df_asistentes"]
+                
+                # --- LIMPIEZA DE FORMULARIO PARA NUEVO REGISTRO ---
+                # Definimos todas las llaves de los widgets que queremos resetear
+                keys_to_reset = [
+                    "cap_nombre", "cap_tienda", "cap_hora", "cap_fecha", 
+                    "cap_modalidad", "cap_archivo", "cap_tipo", "cap_dni", 
+                    "cap_instructor_nombres", "cap_puesto", "cap_area_empresa",
+                    "df_asistentes", "editor_asistentes"
+                ]
+                for key in keys_to_reset:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
                 st.rerun()
             else:
                 st.error("❌ Hubo un error al guardar algunos datos. Por favor verifica la conexión.")
