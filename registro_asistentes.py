@@ -85,6 +85,19 @@ def guardar_en_bq(df, table_id):
         return False
 
 def render_registro():
+    # --- 0. RESET DE FORMULARIO (Si se activó tras guardar exitosamente) ---
+    if st.session_state.get("reset_form"):
+        keys_to_reset = [
+            "cap_nombre", "cap_tienda", "cap_hora", "cap_fecha", 
+            "cap_modalidad", "cap_tipo", "cap_dni", 
+            "cap_instructor_nombres", "cap_puesto", "cap_area_empresa",
+            "df_asistentes", "editor_asistentes", "cap_archivo"
+        ]
+        for k in keys_to_reset:
+            if k in st.session_state:
+                del st.session_state[k]
+        st.session_state["reset_form"] = False
+
     # --- 1. RADAR DE CIERRE (Se activa después de un rerun) ---
     if st.session_state.get("ejecutar_cierre_loader"):
         st.markdown('<div class="señal-finalizado"></div>', unsafe_allow_html=True)
@@ -292,29 +305,7 @@ def render_registro():
                 st.session_state["_msg_exito"] = "✅ Registro completo guardado exitosamente en BigQuery."
                 st.session_state["_mostrar_balloons"] = True
                 st.session_state["ejecutar_cierre_loader"] = True
-                
-                # --- LIMPIEZA DE FORMULARIO PARA NUEVO REGISTRO ---
-                # Reseteamos los valores directamente en el session_state
-                st.session_state["cap_nombre"] = ""
-                st.session_state["cap_tienda"] = ""
-                st.session_state["cap_hora"] = 1.00
-                st.session_state["cap_fecha"] = datetime.date.today()
-                st.session_state["cap_modalidad"] = "Presencial"
-                st.session_state["cap_tipo"] = ""
-                st.session_state["cap_dni"] = ""
-                st.session_state["cap_instructor_nombres"] = ""
-                st.session_state["cap_puesto"] = ""
-                st.session_state["cap_area_empresa"] = ""
-                
-                # Para el archivo y el estado del editor, usamos del para forzar el reset
-                if "cap_archivo" in st.session_state: del st.session_state["cap_archivo"]
-                if "editor_asistentes" in st.session_state: del st.session_state["editor_asistentes"]
-                
-                # Resetear la tabla a 30 filas vacías
-                columnas_tabla = ["DNI", "Código Ofisis", "Apellidos y Nombres", "Cargo",
-                                 "Área", "Tienda", "Género", "Tipo de contrato", "Edad"]
-                st.session_state["df_asistentes"] = pd.DataFrame("", index=range(30), columns=columnas_tabla)
-                
+                st.session_state["reset_form"] = True
                 st.rerun()
             else:
                 st.error("❌ Hubo un error al guardar algunos datos. Por favor verifica la conexión.")
