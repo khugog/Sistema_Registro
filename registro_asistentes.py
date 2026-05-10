@@ -216,7 +216,7 @@ def render_registro():
                         df.at[idx, "Área"] = str(buscar_valor(["nombre_del_departamento", "area", "departamento", "gerencia"]))
                         df.at[idx, "Tienda"] = str(buscar_valor(["nombre_de_ubicacion", "tienda", "ubicacion", "sede", "sucursal", "local"]))
                         df.at[idx, "Género"] = str(buscar_valor(["genero_de_persona", "genero", "sexo"]))
-                        df.at[idx, "Tipo de contrato"] = str(buscar_valor(["tipo_de_contrato", "contrato"]))
+                        df.at[idx, "Tipo de contrato"] = str(buscar_valor(["contrato", "tipo_de_contrato"]))
                         
                         fnac = buscar_valor(["fecha_de_nacimiento_de_persona", "fecha_nacimiento", "nacimiento"])
                         if fnac:
@@ -231,6 +231,12 @@ def render_registro():
                 st.session_state["df_asistentes"] = df
                 st.session_state["_msg_exito"] = f"✅ Validados {encontrados} colaboradores."
                 st.session_state["ejecutar_cierre_loader"] = True
+                
+                # IMPORTANTE: Limpiar el estado interno del editor para que 
+                # la grilla visualice correctamente las celdas actualizadas
+                if "editor_asistentes" in st.session_state:
+                    del st.session_state["editor_asistentes"]
+                    
                 st.rerun()
             except Exception as e:
                 st.error(f"Error: {e}")
