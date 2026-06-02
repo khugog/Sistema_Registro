@@ -301,13 +301,40 @@ def render_registro():
             if col not in df_asist.columns:
                 df_asist[col] = ""
 
-        # 6. Ejecutar Guardado
+        # 6. Guardar nuevos colaboradores en la tabla maestra de colaboradores
+        df_colaboradores_nuevos = df_asist[["DNI", "Codigo_Ofisis", "Apellidos_y_Nombres", "Cargo", "Area", "Tienda", "Genero", "Tipo_de_contrato", "Edad"]].copy()
+        df_colaboradores_nuevos = df_colaboradores_nuevos.drop_duplicates(subset=["DNI"])
+        
+        # Obtener DNIs existentes para evitar duplicados
+        dnis_existentes = set()
+        try:
+            df_existente = buscar_dnis_en_bq(tuple(df_colaboradores_nuevos["DNI"].tolist()))
+            if not df_existente.empty:
+                # Detectar columna de DNI
+                col_dni = None
+                for c in df_existente.columns:
+                    if any(p in c.lower() for p in ['numero_de_documento', 'dni', 'documento', 'identidad']):
+                        col_dni = c
+                        break
+                if col_dni:
+                    df_existente[col_dni] = df_existente[col_dni].astype(str).str.replace(r'\.0$', '', regex=True)
+                    dnis_existentes = set(df_existente[col_dni].tolist())
+        except:
+            pass
+        
+        # Filtrar solo colaboradores nuevos
+        df_colaboradores_nuevos = df_colaboradores_nuevos[~df_colaboradores_nuevos["DNI"].isin(dnis_existentes)]
+
+        # 7. Ejecutar Guardado
         with st.spinner("Guardando en BigQuery..."):
             exito1 = guardar_en_bq(df_cap, TABLE_CAPACITACIONES)
             exito2 = guardar_en_bq(df_coach, TABLE_CAPACITADORES)
             exito3 = guardar_en_bq(df_asist, TABLE_ASISTENTES)
+            exito4 = True
+            if not df_colaboradores_nuevos.empty:
+                exito4 = guardar_en_bq(df_colaboradores_nuevos, TABLE_FULL_NAME)
 
-            if exito1 and exito2 and exito3:
+            if exito1 and exito2 and exito3 and exito4:
                 st.session_state["_msg_exito"] = "✅ Registro completo guardado exitosamente en BigQuery."
                 st.session_state["_mostrar_balloons"] = True
                 st.session_state["ejecutar_cierre_loader"] = True
