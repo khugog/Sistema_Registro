@@ -6,6 +6,7 @@ import os
 import uuid
 import datetime
 import math
+from zoneinfo import ZoneInfo
 
 # ==========================================
 # CONFIGURACIÓN BIGQUERY
@@ -199,6 +200,7 @@ def render_registro():
                             break
                     if col_idx:
                         df_res[col_idx] = df_res[col_idx].astype(str).str.replace(r'\.0$', '', regex=True)
+                        df_res = df_res.drop_duplicates(subset=[col_idx])
                         bq_dict = df_res.set_index(col_idx).to_dict('index')
 
                 encontrados = 0
@@ -247,8 +249,10 @@ def render_registro():
             st.warning("⚠️ Por favor, completa el Nombre de la Capacitación y el DNI del Capacitador.")
             st.stop()
 
-        # 2. Generar ID de Capacitación único
-        id_cap = f"CAP-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:4]}"
+        # 2. Generar ID de Capacitación único con zona horaria de Perú
+        zona_peru = ZoneInfo("America/Lima")
+        fecha_actual = datetime.datetime.now(zona_peru)
+        id_cap = f"CAP-{fecha_actual.strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:4]}"
 
         # 3. Preparar Datos de Capacitación
         df_cap = pd.DataFrame([{
@@ -259,7 +263,7 @@ def render_registro():
             "Modalidad": st.session_state["cap_modalidad"],
             "Tienda": st.session_state["cap_tienda"],
             "Nombre_Archivo_Adjunto": st.session_state["cap_archivo"].name if st.session_state["cap_archivo"] else "",
-            "Fecha_Carga_Sistema": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "Fecha_Carga_Sistema": fecha_actual.strftime("%Y-%m-%d %H:%M:%S")
         }])
 
         # 4. Preparar Datos del Capacitador
